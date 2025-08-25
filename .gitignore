@@ -1,0 +1,12 @@
+# Ignora carpetas de compilación y archivos grandes
+build/
+install/
+log/
+*.csv
+*.txt
+*.log
+*.env
+
+# Ignora datos y dependencias pesadas
+Data/
+
