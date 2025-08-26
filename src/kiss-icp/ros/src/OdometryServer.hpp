@@ -42,6 +42,10 @@ class OdometryServer : public rclcpp::Node {
 public:
     /// OdometryServer constructor
     OdometryServer() = delete;
+
+    /// Destructor
+    ~OdometryServer(); 
+
     explicit OdometryServer(const rclcpp::NodeOptions &options);
 
 private:
@@ -84,6 +88,8 @@ private:
     /// Global/map coordinate frame.
     std::string lidar_odom_frame_{"odom_lidar"};
     std::string base_frame_{};
+    std::ofstream timing_file_;
+    std::string timing_log_path_{};
 
     /// Covariance diagonal
     double position_covariance_;

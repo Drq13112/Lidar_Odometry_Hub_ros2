@@ -58,7 +58,7 @@ public:
         }
 
         // Calcular y mostrar métricas finales
-        calculate_final_metrics();
+        //calculate_final_metrics();
         save_trajectories();
         plot_trajectories();
     }
@@ -141,7 +141,7 @@ private:
         aligned_estimated_pose.position.y = initial_gps_.y + dy_rot;
         aligned_estimated_pose.position.z = initial_gps_.z + dz;
 
-        // --- CORRECCIÓN DE LA ORIENTACIÓN ---
+
         tf2::Quaternion estimator_q;
         tf2::fromMsg(pose.orientation, estimator_q);
         tf2::Quaternion gps_initial_rotation_q;
@@ -166,17 +166,17 @@ private:
         double ape = calculate_ape(est_pose_data.transform, gt_pose_data.transform);
         double rpe = 0.0;
         
-        if (estimated_poses_.size() > 1)
-        {
-            rpe = calculate_rpe(
-                estimated_poses_[estimated_poses_.size()-2].transform,
-                estimated_poses_.back().transform,
-                ground_truth_poses_[ground_truth_poses_.size()-2].transform,
-                ground_truth_poses_.back().transform
-            );
-        }
+        // if (estimated_poses_.size() > 1)
+        // {
+        //     rpe = calculate_rpe(
+        //         estimated_poses_[estimated_poses_.size()-2].transform,
+        //         estimated_poses_.back().transform,
+        //         ground_truth_poses_[ground_truth_poses_.size()-2].transform,
+        //         ground_truth_poses_.back().transform
+        //     );
+        // }
 
-        double ate = calculate_ate();
+        //double ate = calculate_ate();
 
         // RCLCPP_INFO(this->get_logger(), "APE: %.3f m | RPE: %.3f m | ATE: %.3f m | Est(x,y): (%.2f, %.2f) | GT(x,y): (%.2f, %.2f)",
         //             ape, rpe, ate, estimated_pose.pose.pose.position.x, estimated_pose.pose.pose.position.y, 
@@ -284,9 +284,9 @@ private:
         Eigen::Vector3d pos_diff = pos_gt - pos_est;
         
         // Obtener el error absoluto para cada componente de posición
-        double error_x = std::abs(pos_diff.x());
-        double error_y = std::abs(pos_diff.y());
-        double error_z = std::abs(pos_diff.z());
+        double error_x = pos_diff.x();
+        double error_y = pos_diff.y();
+        double error_z = pos_diff.z();
 
         // --- Error de Orientación ---
         Eigen::Matrix3d R_est = T_est.block<3,3>(0, 0);
@@ -302,9 +302,24 @@ private:
         double cos_theta = std::max(-1.0, std::min(1.0, (trace - 1.0) / 2.0));
         double orientation_error_rad = std::acos(cos_theta);
 
+        
+        // --- CÁLCULO DE ERROR DE YAW (MODIFICADO) ---
+        // Extraer el yaw de cada matriz de rotación
+        // atan2(R(1,0), R(0,0)) da el yaw
+        double yaw_est = atan2(R_est(1, 0), R_est(0, 0));
+        double yaw_gt = atan2(R_gt(1, 0), R_gt(0, 0));
+
+        // Calcular la diferencia, asegurándose de manejar el salto de -PI a PI
+        double yaw_error_rad = yaw_gt - yaw_est;
+        if (yaw_error_rad > M_PI) {
+            yaw_error_rad -= 2 * M_PI;
+        } else if (yaw_error_rad < -M_PI) {
+            yaw_error_rad += 2 * M_PI;
+        }
+
         // Loguear los errores desglosados por componente
         RCLCPP_INFO(this->get_logger(), "APE components -> Pos(X,Y,Z): (%.3f, %.3f, %.3f) m | Ori: %.3f deg",
-                    error_x, error_y, error_z, orientation_error_rad * 180.0 / M_PI);
+                    error_x, error_y, error_z, yaw_error_rad * 180.0 / M_PI);
 
         // Devolver el error de posición total (norma euclidiana), que es el valor principal para el log global
         return pos_diff.norm();
@@ -397,69 +412,65 @@ private:
         RCLCPP_INFO(this->get_logger(), "======================================");
     }
 
-void save_trajectories()
-{
-    RCLCPP_INFO(this->get_logger(), "Guardando trayectorias en /home/david/ros2_ws/ ...");
-    std::ofstream est_file("/home/david/ros2_ws/odom_est_traj.csv");
-    std::ofstream gt_file("/home/david/ros2_ws/odom_gt_traj.csv");
-
-    if (got_initial_gps_)
+    void save_trajectories()
     {
-        for (size_t i = 0; i < est_traj_.size(); ++i)
+        RCLCPP_INFO(this->get_logger(), "Guardando trayectorias en /home/david/ros2_ws/ ...");
+        std::ofstream est_file("/home/david/ros2_ws/odom_est_traj.csv");
+        std::ofstream gt_file("/home/david/ros2_ws/odom_gt_traj.csv");
+
+        // Escribir cabeceras en los ficheros CSV
+        est_file << "x,y,z,qx,qy,qz,qw\n";
+        gt_file << "x,y,z,qx,qy,qz,qw\n";
+
+        // No es necesario restar initial_gps_ aquí si el ploteo lo maneja
+        // o si las poses ya están en un marco común.
+        // Para la evaluación, es mejor guardar las poses globales alineadas.
+
+        size_t n = std::min(estimated_poses_.size(), ground_truth_poses_.size());
+
+        for (size_t i = 0; i < n; ++i)
         {
-            const auto& est_pose = estimated_poses_[i].transform;
-            const auto& est_position = est_pose.block<3, 1>(0, 3);
-            const auto& est_orientation = tf2::Quaternion(
-                est_pose(0, 0), est_pose(0, 1), est_pose(0, 2), est_pose(3, 3)
+            // --- Pose Estimada ---
+            const auto& est_transform = estimated_poses_[i].transform;
+            const auto& est_position = est_transform.block<3, 1>(0, 3);
+            
+            // CORRECCIÓN: Convertir la matriz de rotación a cuaternión
+            tf2::Matrix3x3 est_rot_matrix(
+                est_transform(0, 0), est_transform(0, 1), est_transform(0, 2),
+                est_transform(1, 0), est_transform(1, 1), est_transform(1, 2),
+                est_transform(2, 0), est_transform(2, 1), est_transform(2, 2)
             );
+            tf2::Quaternion est_orientation;
+            est_rot_matrix.getRotation(est_orientation);
+            est_orientation.normalize();
 
-            est_file << est_position.x() - initial_gps_.x << "," << est_position.y() - initial_gps_.y << "," << est_position.z() - initial_gps_.z << ","
-                     << est_orientation.x() << "," << est_orientation.y() << "," << est_orientation.z() << "," << est_orientation.w() << std::endl;
+            est_file << std::fixed << std::setprecision(6)
+                    << est_position.x() << "," << est_position.y() << "," << est_position.z() << ","
+                    << est_orientation.x() << "," << est_orientation.y() << "," << est_orientation.z() << "," << est_orientation.w() << std::endl;
 
-            if (i < gt_traj_.size())
-            {
-                const auto& gt_pose = ground_truth_poses_[i].transform;
-                const auto& gt_position = gt_pose.block<3, 1>(0, 3);
-                const auto& gt_orientation = tf2::Quaternion(
-                    gt_pose(0, 0), gt_pose(0, 1), gt_pose(0, 2), gt_pose(3, 3)
-                );
+            // --- Pose Ground Truth ---
+            const auto& gt_transform = ground_truth_poses_[i].transform;
+            const auto& gt_position = gt_transform.block<3, 1>(0, 3);
 
-                gt_file << gt_position.x() - initial_gps_.x << "," << gt_position.y() - initial_gps_.y << "," << gt_position.z() - initial_gps_.z << ","
-                         << gt_orientation.x() << "," << gt_orientation.y() << "," << gt_orientation.z() << "," << gt_orientation.w() << std::endl;
-            }
-        }
-    }
-    else
-    {
-        for (size_t i = 0; i < est_traj_.size(); ++i)
-        {
-            const auto& est_pose = estimated_poses_[i].transform;
-            const auto& est_position = est_pose.block<3, 1>(0, 3);
-            const auto& est_orientation = tf2::Quaternion(
-                est_pose(0, 0), est_pose(0, 1), est_pose(0, 2), est_pose(3, 3)
+            // CORRECCIÓN: Convertir la matriz de rotación a cuaternión
+            tf2::Matrix3x3 gt_rot_matrix(
+                gt_transform(0, 0), gt_transform(0, 1), gt_transform(0, 2),
+                gt_transform(1, 0), gt_transform(1, 1), gt_transform(1, 2),
+                gt_transform(2, 0), gt_transform(2, 1), gt_transform(2, 2)
             );
+            tf2::Quaternion gt_orientation;
+            gt_rot_matrix.getRotation(gt_orientation);
+            gt_orientation.normalize();
 
-            est_file << est_position.x() << "," << est_position.y() << "," << est_position.z() << ","
-                     << est_orientation.x() << "," << est_orientation.y() << "," << est_orientation.z() << "," << est_orientation.w() << std::endl;
-
-            if (i < gt_traj_.size())
-            {
-                const auto& gt_pose = ground_truth_poses_[i].transform;
-                const auto& gt_position = gt_pose.block<3, 1>(0, 3);
-                const auto& gt_orientation = tf2::Quaternion(
-                    gt_pose(0, 0), gt_pose(0, 1), gt_pose(0, 2), gt_pose(3, 3)
-                );
-
-                gt_file << gt_position.x() << "," << gt_position.y() << "," << gt_position.z() << ","
-                         << gt_orientation.x() << "," << gt_orientation.y() << "," << gt_orientation.z() << "," << gt_orientation.w() << std::endl;
-            }
+            gt_file << std::fixed << std::setprecision(6)
+                    << gt_position.x() << "," << gt_position.y() << "," << gt_position.z() << ","
+                    << gt_orientation.x() << "," << gt_orientation.y() << "," << gt_orientation.z() << "," << gt_orientation.w() << std::endl;
         }
-    }
 
-    est_file.close();
-    gt_file.close();
-    RCLCPP_INFO(this->get_logger(), "Trayectorias guardadas.");
-}
+        est_file.close();
+        gt_file.close();
+        RCLCPP_INFO(this->get_logger(), "Trayectorias guardadas.");
+    }
 
     void plot_trajectories()
     {

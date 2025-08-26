@@ -162,25 +162,62 @@ def plot_trajectories():
     fig_comp, ax1 = plt.subplots(1, 1, figsize=(10, 10))
     ax1.plot(gt_df['x'], gt_df['y'], label='Trayectoria Real (GPS)', color='blue', linewidth=2)
     ax1.plot(est_df['x'], est_df['y'], label='Trayectoria Estimada (LIDAR)', color='red', linestyle='--', linewidth=2)
+
+    # --- DIBUJAR LÍNEAS DE ERROR, PUNTOS DE POSE Y VECTORES DE ORIENTACIÓN ---
+    error_line_step = 20  # Aumentamos el paso para no saturar la gráfica
+    vector_length = 0.5   # Longitud de la flecha de orientación en metros
+
+    for i in range(0, min_len, error_line_step):
+        # --- Línea de error y puntos de pose ---
+        ax1.plot([gt_df['x'].iloc[i], est_df['x'].iloc[i]], 
+                 [gt_df['y'].iloc[i], est_df['y'].iloc[i]], 
+                 color='gray', linestyle=':', linewidth=0.8, 
+                 label='Error de posición' if i == 0 else "")
+
+        ax1.plot(gt_df['x'].iloc[i], gt_df['y'].iloc[i], marker='o', color='blue', markersize=4, label='Pose GPS' if i == 0 else "")
+        ax1.plot(est_df['x'].iloc[i], est_df['y'].iloc[i], marker='x', color='red', markersize=5, label='Pose Estimada' if i == 0 else "")
+
+        # --- Vectores de Orientación ---
+        # Orientación Real (GPS)
+        q_gt = gt_df.iloc[i][['qx', 'qy', 'qz', 'qw']].values
+        R_gt = Rotation.from_quat(q_gt).as_matrix()
+        # El vector de dirección (adelante) es la primera columna de la matriz de rotación
+        dir_gt = R_gt[:2, 0] 
+        ax1.arrow(gt_df['x'].iloc[i], gt_df['y'].iloc[i], 
+                  dir_gt[0] * vector_length, dir_gt[1] * vector_length,
+                  head_width=1.1, head_length=2.2, fc='cyan', ec='blue',
+                  label='Orientación Real' if i == 0 else "")
+
+        # Orientación Estimada (LIDAR)
+        q_est = est_df.iloc[i][['qx', 'qy', 'qz', 'qw']].values
+        R_est = Rotation.from_quat(q_est).as_matrix()
+        dir_est = R_est[:2, 0]
+        ax1.arrow(est_df['x'].iloc[i], est_df['y'].iloc[i], 
+                  dir_est[0] * vector_length, dir_est[1] * vector_length,
+                  head_width=1.1, head_length=2.2, fc='magenta', ec='red',
+                  label='Orientación Estimada' if i == 0 else "")
+
+
     ax1.set_title('Comparación de Trayectorias 2D (Plano XY)')
     ax1.set_xlabel('Coordenada X (m)')
     ax1.set_ylabel('Coordenada Y (m)')
     ax1.legend()
     ax1.grid(True)
     ax1.set_aspect('equal', adjustable='box')
+    plt.show()
     plt.savefig(output_path, dpi=300)
     print(f"Gráfica de comparación 2D guardada en: {output_path}")
 
-    # --- GRÁFICO 3: Visualización de trayectorias en 3D ---
-    fig_3d = plt.figure(figsize=(10, 8))
-    ax_3d = fig_3d.add_subplot(111, projection='3d')
-    ax_3d.plot(gt_df['x'], gt_df['y'], gt_df['z'], label='Trayectoria Real (GPS)', color='blue', linewidth=2)
-    ax_3d.plot(est_df['x'], est_df['y'], est_df['z'], label='Trayectoria Estimada (LIDAR)', color='red', linestyle='--', linewidth=2)
-    ax_3d.set_title('Comparación de Trayectorias 3D')
-    ax_3d.set_xlabel('X (m)'), ax_3d.set_ylabel('Y (m)'), ax_3d.set_zlabel('Z (m)')
-    ax_3d.legend(), ax_3d.grid(True)
-    plt.savefig(trajectory_3d_path, dpi=300)
-    print(f"Visualización 3D guardada en: {trajectory_3d_path}")
+    # # --- GRÁFICO 3: Visualización de trayectorias en 3D ---
+    # fig_3d = plt.figure(figsize=(10, 8))
+    # ax_3d = fig_3d.add_subplot(111, projection='3d')
+    # ax_3d.plot(gt_df['x'], gt_df['y'], gt_df['z'], label='Trayectoria Real (GPS)', color='blue', linewidth=2)
+    # ax_3d.plot(est_df['x'], est_df['y'], est_df['z'], label='Trayectoria Estimada (LIDAR)', color='red', linestyle='--', linewidth=2)
+    # ax_3d.set_title('Comparación de Trayectorias 3D')
+    # ax_3d.set_xlabel('X (m)'), ax_3d.set_ylabel('Y (m)'), ax_3d.set_zlabel('Z (m)')
+    # ax_3d.legend(), ax_3d.grid(True)
+    # plt.savefig(trajectory_3d_path, dpi=300)
+    # print(f"Visualización 3D guardada en: {trajectory_3d_path}")
 
 if __name__ == '__main__':
     plot_trajectories()

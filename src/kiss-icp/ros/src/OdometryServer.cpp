@@ -25,6 +25,7 @@
 #include <sophus/se3.hpp>
 #include <utility>
 #include <vector>
+#include <fstream>
 
 // KISS-ICP-ROS
 #include "OdometryServer.hpp"
@@ -101,12 +102,31 @@ OdometryServer::OdometryServer(const rclcpp::NodeOptions &options)
     tf2_buffer_->setUsingDedicatedThread(true);
     tf2_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf2_buffer_);
 
+    if (!timing_log_path_.empty()) {
+        timing_file_.open(timing_log_path_);
+        if (!timing_file_.is_open()) {
+            RCLCPP_ERROR(this->get_logger(), "Failed to open timing file: %s",
+                         timing_log_path_.c_str());
+        } else {
+            RCLCPP_INFO(this->get_logger(), "Logging KISS-ICP processing times to %s",
+                        timing_log_path_.c_str());
+            timing_file_ << "processing_time_ms\n";
+        }
+    }
+
     RCLCPP_INFO(this->get_logger(), "KISS-ICP ROS 2 odometry node initialized");
+}
+
+OdometryServer::~OdometryServer() {
+    if (timing_file_.is_open()) {
+        timing_file_.close();
+    }
 }
 
 void OdometryServer::initializeParameters(kiss_icp::pipeline::KISSConfig &config) {
     RCLCPP_INFO(this->get_logger(), "Initializing parameters");
 
+    timing_log_path_ = declare_parameter<std::string>("timing_log_path_", "home/david/ros2_ws/kiss_icp_timing_log.txt");
     base_frame_ = declare_parameter<std::string>("base_frame", base_frame_);
     RCLCPP_INFO(this->get_logger(), "\tBase frame: %s", base_frame_.c_str());
     lidar_odom_frame_ = declare_parameter<std::string>("lidar_odom_frame", lidar_odom_frame_);
@@ -153,6 +173,7 @@ void OdometryServer::initializeParameters(kiss_icp::pipeline::KISSConfig &config
                     "[WARNING] max_range is smaller than min_range, settng min_range to 0.0");
         config.min_range = 0.0;
     }
+
 }
 
 void OdometryServer::RegisterFrame(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg) {
@@ -200,6 +221,12 @@ void OdometryServer::RegisterFrame(const sensor_msgs::msg::PointCloud2::ConstSha
         end_processing - start_processing).count();
     const auto total_ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(
         end_total - start_total).count();
+
+
+    // Write processing time to file if open
+    if (timing_file_.is_open()) {
+        timing_file_ << processing_ms << "\n";
+    }
     
     if (processing_ms > 1e-3) {
         valid_frame_count++;

@@ -71,6 +71,9 @@
         "regex": "cpp",
         "valarray": "cpp",
         "any": "cpp",
-        "core": "cpp"
+        "core": "cpp",
+        "hash_map": "cpp",
+        "*.inc": "cpp",
+        "alignedvector3": "cpp"
     }
 }

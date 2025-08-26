@@ -60,6 +60,6 @@ def generate_launch_description():
     return LaunchDescription([
 
         # mola_launch,
-        odom_comparator_node_kiss,
+        odom_comparator_node,
         static_tf_base_to_lidar
     ])
