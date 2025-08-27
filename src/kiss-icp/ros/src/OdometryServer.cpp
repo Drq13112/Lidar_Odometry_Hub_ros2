@@ -1,37 +1,14 @@
-// MIT License
-//
-// Copyright (c) 2022 Ignacio Vizzo, Tiziano Guadagnino, Benedikt Mersch, Cyrill
-// Stachniss.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
 #include <Eigen/Core>
 #include <memory>
 #include <sophus/se3.hpp>
 #include <utility>
 #include <vector>
 #include <fstream>
+#include <chrono> 
 
 // KISS-ICP-ROS
 #include "OdometryServer.hpp"
 #include "Utils.hpp"
-
-#include <chrono> 
 
 // KISS-ICP
 #include "kiss_icp/pipeline/KissICP.hpp"
@@ -48,6 +25,8 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <std_msgs/msg/string.hpp>
 
+#include <fstream>  // std::ofstream
+
 namespace {
 Sophus::SE3d LookupTransform(const std::string &target_frame,
                              const std::string &source_frame,
@@ -63,8 +42,7 @@ Sophus::SE3d LookupTransform(const std::string &target_frame,
     }
     RCLCPP_WARN(rclcpp::get_logger("LookupTransform"), "Failed to find tf. Reason=%s",
                 err_msg.c_str());
-    // default construction is the identity
-    return Sophus::SE3d();
+    return Sophus::SE3d(); // identidad
 }
 }  // namespace
 
@@ -102,15 +80,17 @@ OdometryServer::OdometryServer(const rclcpp::NodeOptions &options)
     tf2_buffer_->setUsingDedicatedThread(true);
     tf2_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf2_buffer_);
 
+    // Abrir archivo CSV para guardar los tiempos de procesamiento.
     if (!timing_log_path_.empty()) {
-        timing_file_.open(timing_log_path_);
+        timing_file_.open(timing_log_path_, std::ios::out);
         if (!timing_file_.is_open()) {
             RCLCPP_ERROR(this->get_logger(), "Failed to open timing file: %s",
                          timing_log_path_.c_str());
         } else {
             RCLCPP_INFO(this->get_logger(), "Logging KISS-ICP processing times to %s",
                         timing_log_path_.c_str());
-            timing_file_ << "processing_time_ms\n";
+            // Cabezera del CSV (en este ejemplo, solo se guarda processing_time_ms)
+            timing_file_ << "timestamp,processing_time_ms\n";
         }
     }
 
@@ -126,7 +106,7 @@ OdometryServer::~OdometryServer() {
 void OdometryServer::initializeParameters(kiss_icp::pipeline::KISSConfig &config) {
     RCLCPP_INFO(this->get_logger(), "Initializing parameters");
 
-    timing_log_path_ = declare_parameter<std::string>("timing_log_path_", "home/david/ros2_ws/kiss_icp_timing_log.txt");
+    timing_log_path_ = declare_parameter<std::string>("timing_log_path_", "/home/david/ros2_ws/kiss_icp_timing_log.csv");
     base_frame_ = declare_parameter<std::string>("base_frame", base_frame_);
     RCLCPP_INFO(this->get_logger(), "\tBase frame: %s", base_frame_.c_str());
     lidar_odom_frame_ = declare_parameter<std::string>("lidar_odom_frame", lidar_odom_frame_);
@@ -170,10 +150,9 @@ void OdometryServer::initializeParameters(kiss_icp::pipeline::KISSConfig &config
     RCLCPP_INFO(this->get_logger(), "\tMax number of threads: %d", config.max_num_threads);
     if (config.max_range < config.min_range) {
         RCLCPP_WARN(get_logger(),
-                    "[WARNING] max_range is smaller than min_range, settng min_range to 0.0");
+                    "[WARNING] max_range is smaller than min_range, setting min_range to 0.0");
         config.min_range = 0.0;
     }
-
 }
 
 void OdometryServer::RegisterFrame(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg) {
@@ -185,12 +164,10 @@ void OdometryServer::RegisterFrame(const sensor_msgs::msg::PointCloud2::ConstSha
 
     const auto current_time = std::chrono::high_resolution_clock::now();
     
-    // Solo calcular frecuencia después del primer frame
     if (!first_frame) {
         const auto frame_interval_ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(
             current_time - last_frame_time).count();
         const double frequency_hz = 1000.0 / frame_interval_ms;
-
         RCLCPP_INFO(this->get_logger(), "Frecuencia: %.1f Hz, Intervalo: %.2f ms", 
                 frequency_hz, frame_interval_ms);
     } else {
@@ -214,7 +191,6 @@ void OdometryServer::RegisterFrame(const sensor_msgs::msg::PointCloud2::ConstSha
     
     const auto end_total = std::chrono::high_resolution_clock::now();
     
-    // Calcular duraciones
     const auto conversion_ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(
         end_conversion - start_conversion).count();
     const auto processing_ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(
@@ -222,10 +198,11 @@ void OdometryServer::RegisterFrame(const sensor_msgs::msg::PointCloud2::ConstSha
     const auto total_ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(
         end_total - start_total).count();
 
-
-    // Write processing time to file if open
-    if (timing_file_.is_open()) {
-        timing_file_ << processing_ms << "\n";
+    // Escribir el tiempo de procesamiento en el CSV
+        if (timing_file_.is_open()) {
+        // Usar el timestamp del mensaje para una correcta sincronización
+        double msg_timestamp_sec = rclcpp::Time(msg->header.stamp).seconds();
+        timing_file_ << std::fixed << std::setprecision(6) << msg_timestamp_sec << "," << processing_ms << "\n";
     }
     
     if (processing_ms > 1e-3) {
@@ -243,12 +220,9 @@ void OdometryServer::RegisterFrame(const sensor_msgs::msg::PointCloud2::ConstSha
                    conversion_ms, avg_conversion_ms, points.size());
     }
 
-    // Extract the last KISS-ICP pose, ego-centric to the LiDAR
+    // Extraer y publicar la pose de KISS-ICP
     const Sophus::SE3d kiss_pose = kiss_icp_->pose();
-
-    // Spit the current estimated pose to ROS msgs handling the desired target frame
     PublishOdometry(kiss_pose, msg->header);
-    // Publishing these clouds is a bit costly, so do it only if we are debugging
     if (publish_debug_clouds_) {
         PublishClouds(frame, keypoints, msg->header);
     }
@@ -256,7 +230,6 @@ void OdometryServer::RegisterFrame(const sensor_msgs::msg::PointCloud2::ConstSha
 
 void OdometryServer::PublishOdometry(const Sophus::SE3d &kiss_pose,
                                      const std_msgs::msg::Header &header) {
-    // If necessary, transform the ego-centric pose to the specified base_link/base_footprint frame
     const auto cloud_frame_id = header.frame_id;
     const auto egocentric_estimation = (base_frame_.empty() || base_frame_ == cloud_frame_id);
     const auto moving_frame = egocentric_estimation ? cloud_frame_id : base_frame_;
@@ -266,7 +239,6 @@ void OdometryServer::PublishOdometry(const Sophus::SE3d &kiss_pose,
         return cloud2base * kiss_pose * cloud2base.inverse();
     }();
 
-    // Broadcast the tf ---
     if (publish_odom_tf_) {
         geometry_msgs::msg::TransformStamped transform_msg;
         transform_msg.header.stamp = header.stamp;
@@ -282,7 +254,6 @@ void OdometryServer::PublishOdometry(const Sophus::SE3d &kiss_pose,
         tf_broadcaster_->sendTransform(transform_msg);
     }
 
-    // publish odometry msg
     nav_msgs::msg::Odometry odom_msg;
     odom_msg.header.stamp = header.stamp;
     odom_msg.header.frame_id = lidar_odom_frame_;

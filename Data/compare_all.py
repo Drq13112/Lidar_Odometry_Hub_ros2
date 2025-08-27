@@ -49,6 +49,26 @@ def calculate_ape(est_matrices, gt_matrices):
         
     return np.array(trans_errors), np.array(rot_errors)
 
+def calculate_ape_yaw(est_matrices, gt_matrices):
+    """
+    Calcula el error absoluto de orientación basado únicamente en el ángulo Yaw.
+    """
+    if len(est_matrices) != len(gt_matrices):
+        raise ValueError("Las listas de matrices estimadas y reales deben tener la misma longitud.")
+    
+    yaw_errors = []
+    for T_est, T_gt in zip(est_matrices, gt_matrices):
+        # Extraer el yaw de cada matriz de rotación
+        yaw_est = Rotation.from_matrix(T_est[:3, :3]).as_euler('xyz', degrees=False)[2]
+        yaw_gt = Rotation.from_matrix(T_gt[:3, :3]).as_euler('xyz', degrees=False)[2]
+        
+        # Calcular la diferencia y normalizarla al rango [-pi, pi]
+        error = yaw_est - yaw_gt
+        error = np.arctan2(np.sin(error), np.cos(error))
+        yaw_errors.append(np.abs(error))
+        
+    return np.array(yaw_errors)
+
 def calculate_rpe(est_matrices, gt_matrices, delta=1):
     """Calcula el Relative Pose Error (RPE) para traslación y rotación para un delta dado."""
     if len(est_matrices) != len(gt_matrices):
@@ -146,12 +166,13 @@ def analyze_trajectory(est_path, gt_path, estimator_name):
     gt_matrices_2d = to_transform_matrices(gt_df_2d)
     ape_trans_2d, ape_rot_2d = calculate_ape(est_matrices_2d, gt_matrices_2d)
     rpe_trans_2d, rpe_rot_2d = calculate_rpe(est_matrices_2d, gt_matrices_2d)
+    ape_rot_yaw = calculate_ape_yaw(est_matrices_3d, gt_matrices_3d) # Usamos el error de yaw
 
     # Recopilar todas las métricas en un diccionario
     metrics = {
         "name": estimator_name,
         "ape_trans_3d": get_stats(ape_trans_3d, 'm'),
-        "ape_rot_3d": get_stats(np.rad2deg(ape_rot_3d), 'deg'),
+        "ape_rot_yaw": get_stats(np.rad2deg(ape_rot_yaw), 'deg'),
         "rpe_trans_3d": get_stats(rpe_trans_3d, 'm'),
         "rpe_rot_3d": get_stats(np.rad2deg(rpe_rot_3d), 'deg'),
         "ape_trans_2d": get_stats(ape_trans_2d, 'm'),
@@ -164,7 +185,7 @@ def analyze_trajectory(est_path, gt_path, estimator_name):
     plot_data = {
         "est_df": est_df, "gt_df": gt_df,
         "pos_err": est_df[['x', 'y', 'z']].values - gt_df[['x', 'y', 'z']].values,
-        "ape_rot_3d": ape_rot_3d,
+        "ape_rot_yaw": ape_rot_yaw,
         "min_len": min_len
     }
 
@@ -238,7 +259,7 @@ def generate_combined_error_plot(all_plot_data, all_metrics, output_dir):
         {'title': 'Error en Eje X', 'ylabel': 'Error X (m)', 'data_idx': 0},
         {'title': 'Error en Eje Y', 'ylabel': 'Error Y (m)', 'data_idx': 1},
         {'title': 'Error en Eje Z', 'ylabel': 'Error Z (m)', 'data_idx': 2},
-        {'title': 'Error Angular 3D', 'ylabel': 'Error Angular (°)', 'data_idx': None} # Caso especial
+        {'title': 'Error Angular de Yaw', 'ylabel': 'Error Yaw (°)', 'data_idx': None} # Caso especial
     ]
 
     for i, info in enumerate(plot_info):
@@ -250,7 +271,7 @@ def generate_combined_error_plot(all_plot_data, all_metrics, output_dir):
             if info['data_idx'] is not None: # Errores de posición
                 error_data = plot_data["pos_err"][:min_len_common, info['data_idx']]
             else: # Error de rotación
-                error_data = np.rad2deg(plot_data["ape_rot_3d"][:min_len_common])
+                error_data = np.rad2deg(plot_data["ape_rot_yaw"][:min_len_common])
             
             ax.plot(time_steps, error_data, label=f'{estimator_name}', color=color, linewidth=1.5)
         
@@ -263,6 +284,7 @@ def generate_combined_error_plot(all_plot_data, all_metrics, output_dir):
     fig.tight_layout(rect=[0, 0.03, 1, 0.96])
     
     output_path = os.path.join(output_dir, 'combined_error_comparison.png')
+    plt.show()
     plt.savefig(output_path, dpi=300)
     plt.close()
     print(f"Gráfico de errores combinados guardado en: {output_path}")

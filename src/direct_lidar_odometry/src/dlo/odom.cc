@@ -12,6 +12,8 @@
 #include "dlo/utils.h"
 
 #include <queue>
+#include <fstream>
+#include <chrono>
 
 #include "rclcpp/qos.hpp"
 
@@ -23,6 +25,17 @@
 dlo::OdomNode::OdomNode() : Node("dlo_odom_node") {
 
   this->getParams();
+
+    // Abrir archivo CSV para guardar los tiempos de procesamiento
+  if (!this->timing_log_path_.empty()) {
+    this->timing_file_.open(this->timing_log_path_, std::ios::out);
+    if (!this->timing_file_.is_open()) {
+      RCLCPP_ERROR(this->get_logger(), "No se pudo abrir el archivo de tiempos: %s", this->timing_log_path_.c_str());
+    } else {
+      RCLCPP_INFO(this->get_logger(), "Guardando tiempos de procesamiento de DLO en %s", this->timing_log_path_.c_str());
+      this->timing_file_ << "timestamp,processing_time_ms\n";
+    }
+  }
 
   this->stop_publish_thread = false;
   this->stop_publish_keyframe_thread = false;
@@ -180,8 +193,11 @@ dlo::OdomNode::OdomNode() : Node("dlo_odom_node") {
  * Destructor
  **/
 
-dlo::OdomNode::~OdomNode() {}
-
+dlo::OdomNode::~OdomNode() {
+  if (this->timing_file_.is_open()) {
+    this->timing_file_.close();
+  }
+}
 
 
 /**
@@ -190,6 +206,9 @@ dlo::OdomNode::~OdomNode() {}
 
 void dlo::OdomNode::getParams() {
 
+
+  // Timing log path
+  dlo::declare_param(this, "dlo/odomNode/timing_log_path", this->timing_log_path_, "");
   // Version
   dlo::declare_param(this, "dlo/version", this->version_, "0.0.0");
 
@@ -618,6 +637,7 @@ void dlo::OdomNode::initializeDLO() {
 
 void dlo::OdomNode::icpCB(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& pc) {
 
+  auto start_time = std::chrono::steady_clock::now();
   double then = this->now().seconds();
   this->scan_stamp = pc->header.stamp;
   this->curr_frame_stamp = rclcpp::Time(pc->header.stamp).seconds();
@@ -675,6 +695,13 @@ void dlo::OdomNode::icpCB(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& p
 
   // Update some statistics
   this->comp_times.push_back(this->now().seconds() - then);
+
+  // Guardar tiempo de procesamiento en CSV
+  auto end_time = std::chrono::steady_clock::now();
+  auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+  if (this->timing_file_.is_open()) {
+    this->timing_file_ << this->now().seconds() << "," << duration_ms << "\n";
+  }
 
   // Publish stuff to ROS
   this->publish_thread = std::thread( &dlo::OdomNode::publishToROS, this );

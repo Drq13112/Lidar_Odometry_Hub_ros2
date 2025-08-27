@@ -6,6 +6,9 @@ kiss_icp_node:
   ros__parameters:
     ####    /!\ If you set these ROS-related parameters in the file, they will overwrite the corresponding launch arguments   ####
 
+
+    timing_log_path_: "/home/david/ros2_ws/kiss_icp_timing_log.csv"
+    
     base_frame: "rubyplus"
     # lidar_odom_frame: "odom_lidar"
     # publish_odom_tf: True

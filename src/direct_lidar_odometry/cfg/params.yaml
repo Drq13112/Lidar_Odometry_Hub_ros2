@@ -10,6 +10,8 @@
 /**:
   ros__parameters:
 
+    dlo/odomNode/timing_log_path: "/home/david/ros2_ws/dlo_processing_times.csv"
+
     dlo/odomNode/initialPose/use: true   #false
 
     dlo/odomNode/initialPose/position/x: 0.0

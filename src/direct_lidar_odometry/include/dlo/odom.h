@@ -36,6 +36,10 @@
 // #include <direct_lidar_odometry/save_traj.h>
 #include <nano_gicp/nano_gicp.hpp>
 
+#include <fstream>
+#include <chrono>
+
+
 typedef pcl::PointXYZI PointType;
 
 class dlo::OdomNode: public rclcpp::Node{
@@ -225,6 +229,12 @@ private:
 
   std::string cpu_type;
   std::vector<double> cpu_percents;
+
+  // Archivo para guardar tiempos
+  std::ofstream timing_file_;
+  std::string timing_log_path_;
+
+
   clock_t lastCPU, lastSysCPU, lastUserCPU;
   int numProcessors;
 
